@@ -8,30 +8,28 @@ import (
 	"github.com/yhat/scrape"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
-	"fmt"
 	"sync"
 	"strings"
 	"strconv"
+	"os"
+	"fmt"
+	"encoding/json"
 )
 
 
 
 var(
 
-	resultList [] string
+	resultList [] AmazonResult
 	urls [] string
 	pageMax = 400
 	page = 1
-	startingUrl = "https://www.amazon.com/s/ref=sr_pg_"+string(page)+"?rh=i%3Aaps%2Ck%3ASony&page="+string(page)+"&keywords=Sony&ie=UTF8&qid=1498947694&spIA=B00J7VMRMW,B01IT8LXS2,B06Y2HG62W,B01N7S869U"
-	dellSURL = "https://www.amazon.com/s/ref=sr_pg_"+string(page)+"?fst=as%3Aon&rh=k%3Adell%2Cn%3A172282%2Cn%3A541966%2Cn%3A13896617011&page="+string(page)+"&keywords=dell&ie=UTF8&qid=1498953958&spIA=B012PTEA0O,B01MS6TKUA,B01CH72880,B00UWD90FQ"
 
 )
 
 type AmazonResult struct {
 
-	Title string
-	SoldBy string
-	Info string
+	Info string `json:"info"`
 
 }
 
@@ -92,7 +90,6 @@ func resultNodeGen(in <-chan *html.Node) <-chan string {
 	out := make(chan string)
 	for root := range in {
 		wg.Add(1)
-		go func(n *html.Node) {
 			resultMatcher := func(n *html.Node) bool {
 				if n.DataAtom == atom.Div && n != nil {
 					return scrape.Attr(n, "class") == "a-fixed-left-grid-col a-col-right"
@@ -100,21 +97,34 @@ func resultNodeGen(in <-chan *html.Node) <-chan string {
 				return false
 			}
 
-			resultNodes := scrape.FindAll(n, resultMatcher)
-			    for _, result := range resultNodes{
-					if strings.Contains(scrape.Text(result),"Sponsored P.when"){
-						preString := strings.SplitAfter(scrape.Text(result),"? Leave ad feedback ")
+			var results = scrape.FindAll(root, resultMatcher)
+		var wg1 sync.WaitGroup
+
+		for _, result := range results{
+			wg1.Add(1)
+			//out := make(chan *html.Node)
+					go func(n *html.Node) {
+						defer wg1.Done()
+						if strings.Contains(scrape.Text(n),"Sponsored P.when"){
+						preString := strings.SplitAfter(scrape.Text(n),"? Leave ad feedback ")
 						out <- preString[1]
+
 					}else{
-						out <- scrape.Text(result)
+						out <- scrape.Text(n)
+
 					}
+				}(result)
 
 
 				}
+		go func() {
+			wg1.Wait()
 			wg.Done()
+		}()
 
 
-		}(root)
+
+
 
 	}
 		go func() {
@@ -129,12 +139,32 @@ func resultNodeGen(in <-chan *html.Node) <-chan string {
 
 func urlScraper(){
 	for i := page; i < pageMax+1; i++ {
-		urls = append(urls,"https://www.amazon.com/s/ref=sr_pg_"+strconv.Itoa(page)+"?fst=as%3Aon&rh=k%3Adell%2Cn%3A172282%2Cn%3A541966%2Cn%3A13896617011&page="+strconv.Itoa(page)+"&keywords=dell&ie=UTF8&qid=1498953958&spIA=B012PTEA0O,B01MS6TKUA,B01CH72880,B00UWD90FQ")
+		urls = append(urls,"https://www.amazon.com/s/ref=sr_pg_"+strconv.Itoa(i)+"?fst=as%3Aon&rh=k%3Adell%2Cn%3A172282%2Cn%3A541966%2Cn%3A13896617011&page="+strconv.Itoa(i)+"&keywords=dell&ie=UTF8&qid=1498953958&spIA=B012PTEA0O,B01MS6TKUA,B01CH72880,B00UWD90FQ")
 	}
 	for result := range resultNodeGen(rootGen(respGen(urls...))) {
-		fmt.Println(result)
-		fmt.Println("***************************")
+		resultList = append(resultList, AmazonResult{result})
 	}
+	jsonData, err := json.Marshal(resultList)
+
+	if err != nil {
+		panic(err)
+	}
+
+	// sanity check
+
+	// write to JSON file
+
+	jsonFile, err := os.Create("./DellResults.json")
+
+	if err != nil {
+		panic(err)
+	}
+	defer jsonFile.Close()
+
+	jsonFile.Write(jsonData)
+	jsonFile.Close()
+	fmt.Println("JSON data written to ", jsonFile.Name())
+
 }
 
 
@@ -148,28 +178,5 @@ func main() {
 
 	urlScraper()
 
-	//resp, err := http.Get(startingUrl)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//root, err := html.Parse(resp.Body)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//
-	//// define a matcher
-	//matcher := func(n *html.Node) bool {
-	//	// must check for nil values
-	//	if n.DataAtom == atom.Div && scrape.Attr(n, "id") ==  {
-	//		return scrape.Attr(n.Parent.Parent, "class") == "athing"
-	//	}
-	//	return false
-	//}
-	//// grab all articles and print them
-	//articles := scrape.FindAll(root, matcher)
-	//for i, article := range articles {
-	//	fmt.Printf("%2d %s (%s)\n", i, scrape.Text(article), scrape.Attr(article, "href"))
-	//}
-	//
 
 }
